@@ -21,6 +21,7 @@ interface Suggestion {
 }
 
 export default function DirectionMap() {
+  const pageRef = useRef<HTMLDivElement>(null);
   const mapElRef = useRef<HTMLDivElement>(null);
   const LRef = useRef<typeof LeafletNS | null>(null);
   const mapRef = useRef<LeafletNS.Map | null>(null);
@@ -41,7 +42,8 @@ export default function DirectionMap() {
   const [originSug, setOriginSug] = useState<Suggestion[]>([]);
   const [destSug, setDestSug] = useState<Suggestion[]>([]);
   const [activeLayer, setActiveLayer] = useState<LayerKey>("map");
-  const [toggleOn, setToggleOn] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<{ msg: string; type: StatusType }>({
     msg: "Enter two locations and press Get Directions.",
@@ -58,7 +60,8 @@ export default function DirectionMap() {
       if (cancelled || !mapElRef.current || mapRef.current) return;
       LRef.current = L;
 
-      const map = L.map(mapElRef.current);
+      const map = L.map(mapElRef.current, { zoomControl: false });
+      L.control.zoom({ position: "bottomright" }).addTo(map);
       const layers: Record<LayerKey, LeafletNS.TileLayer> = {
         map: L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
           attribution:
@@ -94,6 +97,27 @@ export default function DirectionMap() {
     layers[type].addTo(map);
     setActiveLayer(type);
   }, []);
+
+  // ─── Fullscreen (native) ────────────────────────────────────
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      pageRef.current?.requestFullscreen?.();
+    } else {
+      document.exitFullscreen?.();
+    }
+  }, []);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  // Leaflet must recompute tiles whenever the viewport changes.
+  useEffect(() => {
+    const t = setTimeout(() => mapRef.current?.invalidateSize(), 350);
+    return () => clearTimeout(t);
+  }, [isFullscreen, panelOpen]);
 
   const makeIcon = useCallback((label: string): LeafletNS.DivIcon => {
     const L = LRef.current!;
@@ -270,127 +294,184 @@ export default function DirectionMap() {
       : "";
 
   return (
-    <div className={styles.page}>
-      <div className={styles.card}>
-        <div className={styles.header}>
-          <span className={styles.headerLabel}>Direction Map</span>
+    <div ref={pageRef} className={styles.page}>
+      {/* Full-screen map */}
+      <div ref={mapElRef} className={styles.map} />
+
+      {/* Floating controls (top-right) */}
+      <div className={styles.topControls}>
+        {!panelOpen && (
           <button
             type="button"
-            aria-label="Toggle"
-            className={`${styles.toggle} ${toggleOn ? "" : styles.toggleOff}`}
-            onClick={() => setToggleOn((v) => !v)}
-          />
-        </div>
-
-        <div className={styles.inputs}>
-          <div className={styles.inputRow}>
-            <div className={styles.pin}>A</div>
-            <div className={styles.inputWrap}>
-              <input
-                className={styles.input}
-                type="text"
-                value={origin}
-                placeholder="From — type a place..."
-                autoComplete="off"
-                onChange={(e) => onInput(e.target.value, "origin")}
-                onBlur={() => setTimeout(() => setOriginSug([]), 200)}
-              />
-              {originSug.length > 0 && (
-                <div className={styles.suggestions}>
-                  {originSug.map((s, i) => (
-                    <div
-                      key={i}
-                      className={styles.suggestionItem}
-                      onMouseDown={() => pickSuggestion(s, "origin")}
-                    >
-                      {s.label}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className={styles.inputRow}>
-            <div className={styles.pin}>B</div>
-            <div className={styles.inputWrap}>
-              <input
-                className={styles.input}
-                type="text"
-                value={dest}
-                placeholder="To — type a place..."
-                autoComplete="off"
-                onChange={(e) => onInput(e.target.value, "dest")}
-                onBlur={() => setTimeout(() => setDestSug([]), 200)}
-              />
-              {destSug.length > 0 && (
-                <div className={styles.suggestions}>
-                  {destSug.map((s, i) => (
-                    <div
-                      key={i}
-                      className={styles.suggestionItem}
-                      onMouseDown={() => pickSuggestion(s, "dest")}
-                    >
-                      {s.label}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <button
-            className={styles.routeBtn}
-            onClick={getRoute}
-            disabled={loading}
+            className={styles.iconBtn}
+            aria-label="Show panel"
+            title="Show controls"
+            onClick={() => setPanelOpen(true)}
           >
-            Get Directions
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
           </button>
-        </div>
-
-        <div className={styles.mapTabs}>
-          <div
-            className={`${styles.tab} ${
-              activeLayer === "map" ? styles.tabActive : ""
-            }`}
-            onClick={() => switchLayer("map")}
-          >
-            Map
-          </div>
-          <div
-            className={`${styles.tab} ${
-              activeLayer === "satellite" ? styles.tabActive : ""
-            }`}
-            onClick={() => switchLayer("satellite")}
-          >
-            Satellite
-          </div>
-        </div>
-
-        <div ref={mapElRef} className={styles.map} />
-
-        <div className={`${styles.statusBar} ${statusClass}`}>
-          {status.type === "loading" && <div className={styles.spinner} />}
-          <span>{status.msg}</span>
-        </div>
-
-        <div className={styles.stats}>
-          <div className={styles.statBox}>
-            <div className={styles.statIcon}>⇌</div>
-            <div className={styles.statInfo}>
-              <span className={styles.statLabel}>Distance Apx.</span>
-              <span className={styles.statValue}>{dist}</span>
-            </div>
-          </div>
-          <div className={styles.statBox}>
-            <div className={styles.statIcon}>⏱</div>
-            <div className={styles.statInfo}>
-              <span className={styles.statLabel}>Duration Apx.</span>
-              <span className={styles.statValue}>{dur}</span>
-            </div>
-          </div>
-        </div>
+        )}
+        <button
+          type="button"
+          className={styles.iconBtn}
+          aria-label="Toggle fullscreen"
+          title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+          onClick={toggleFullscreen}
+        >
+          {isFullscreen ? (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 3v3a2 2 0 0 1-2 2H3" />
+              <path d="M21 8h-3a2 2 0 0 1-2-2V3" />
+              <path d="M3 16h3a2 2 0 0 1 2 2v3" />
+              <path d="M16 21v-3a2 2 0 0 1 2-2h3" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+              <path d="M21 8V5a2 2 0 0 0-2-2h-3" />
+              <path d="M3 16v3a2 2 0 0 0 2 2h3" />
+              <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+            </svg>
+          )}
+        </button>
       </div>
+
+      {/* Glass control panel (left) */}
+      {panelOpen && (
+        <div className={styles.panel}>
+          <div className={styles.header}>
+            <div className={styles.brand}>
+              <div className={styles.brandDot}>🧭</div>
+              <div>
+                <div className={styles.headerTitle}>RouteFlow</div>
+                <div className={styles.headerSub}>Direction Map</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              className={styles.collapseBtn}
+              aria-label="Hide panel"
+              title="Hide panel"
+              onClick={() => setPanelOpen(false)}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+            </button>
+          </div>
+
+          <div className={styles.inputs}>
+            <div className={styles.inputRow}>
+              <div className={styles.pin}>A</div>
+              <div className={styles.inputWrap}>
+                <input
+                  className={styles.input}
+                  type="text"
+                  value={origin}
+                  placeholder="From — type a place..."
+                  autoComplete="off"
+                  onChange={(e) => onInput(e.target.value, "origin")}
+                  onBlur={() => setTimeout(() => setOriginSug([]), 200)}
+                />
+                {originSug.length > 0 && (
+                  <div className={styles.suggestions}>
+                    {originSug.map((s, i) => (
+                      <div
+                        key={i}
+                        className={styles.suggestionItem}
+                        onMouseDown={() => pickSuggestion(s, "origin")}
+                      >
+                        {s.label}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className={styles.inputRow}>
+              <div className={`${styles.pin} ${styles.pinB}`}>B</div>
+              <div className={styles.inputWrap}>
+                <input
+                  className={styles.input}
+                  type="text"
+                  value={dest}
+                  placeholder="To — type a place..."
+                  autoComplete="off"
+                  onChange={(e) => onInput(e.target.value, "dest")}
+                  onBlur={() => setTimeout(() => setDestSug([]), 200)}
+                />
+                {destSug.length > 0 && (
+                  <div className={styles.suggestions}>
+                    {destSug.map((s, i) => (
+                      <div
+                        key={i}
+                        className={styles.suggestionItem}
+                        onMouseDown={() => pickSuggestion(s, "dest")}
+                      >
+                        {s.label}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <button
+              className={styles.routeBtn}
+              onClick={getRoute}
+              disabled={loading}
+            >
+              Get Directions
+            </button>
+          </div>
+
+          <div className={styles.mapTabs}>
+            <div
+              className={`${styles.tab} ${
+                activeLayer === "map" ? styles.tabActive : ""
+              }`}
+              onClick={() => switchLayer("map")}
+            >
+              Map
+            </div>
+            <div
+              className={`${styles.tab} ${
+                activeLayer === "satellite" ? styles.tabActive : ""
+              }`}
+              onClick={() => switchLayer("satellite")}
+            >
+              Satellite
+            </div>
+          </div>
+
+          <div className={`${styles.statusBar} ${statusClass}`}>
+            {status.type === "loading" && <div className={styles.spinner} />}
+            <span>{status.msg}</span>
+          </div>
+
+          <div className={styles.stats}>
+            <div className={styles.statBox}>
+              <div className={styles.statIcon}>⇌</div>
+              <div className={styles.statInfo}>
+                <span className={styles.statLabel}>Distance Apx.</span>
+                <span className={styles.statValue}>{dist}</span>
+              </div>
+            </div>
+            <div className={styles.statBox}>
+              <div className={styles.statIcon}>⏱</div>
+              <div className={styles.statInfo}>
+                <span className={styles.statLabel}>Duration Apx.</span>
+                <span className={styles.statValue}>{dur}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
